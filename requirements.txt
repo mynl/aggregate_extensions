@@ -1,0 +1,7 @@
+aggregate
+IPython
+scipy
+pandas
+numpy
+matplotlib
+
