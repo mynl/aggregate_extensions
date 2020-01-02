@@ -9,7 +9,7 @@ import os
 
 tests_require = ['unittest', 'sly']
 install_requires = [
-    'sly>=0.3'
+    'aggregate>=0.7.5'
 ]
 
 def read(fname):
