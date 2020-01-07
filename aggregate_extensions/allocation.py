@@ -1,4 +1,5 @@
 import sys
+
 sys.path.append('c:\\s\\telos\\python\\aggregate_project')
 
 import itertools
@@ -13,7 +14,7 @@ import re
 # fontsize : int or float or {'xx-small', 'x-small', 'small', 'medium', 'large', 'x-large', 'xx-large'}
 matplotlib.rcParams['legend.fontsize'] = 'xx-small'
 
-aggdevlog  = logging.getLogger('aggdev.log')
+aggdevlog = logging.getLogger('aggdev.log')
 aggdevlog.setLevel(logging.INFO)
 
 
@@ -22,7 +23,7 @@ class Fairness():
     try various marginal combos to see how benefit is allocated
     """
 
-    def __init__(self, agg_spec_dict, bs, log2, subports='all'):
+    def __init__(self, agg_spec_dict, bs, log2, padding=2, subports='all'):
         """
         agg_spec_dict is a dictionary label : agg_clause. The agg clause must include
         the initial \\t and the ending \\n.
@@ -31,7 +32,7 @@ class Fairness():
         self.uw = agg.Underwriter(update=False, create_all=False)
         self.ports = {}
         agg_names = list(self.agg_spec_dict.keys())
-        if subports=='all':
+        if subports == 'all':
             subports = [''.join(i) for i in self.subsets()]
         self.loss = None
         for k in subports:
@@ -41,7 +42,7 @@ class Fairness():
                 if l in k:
                     pgm += agg_spec_dict[l]
             self.ports[k] = self.uw(f'port {k}\n{pgm}\n')
-            self.ports[k].update(bs=bs, log2=log2, add_exa=True, padding=2, trim_df=True, remove_fuzz=True)
+            self.ports[k].update(bs=bs, log2=log2, add_exa=True, padding=padding, trim_df=True, remove_fuzz=True)
             if self.loss is None:
                 self.loss = self.ports[k].density_df.loss
         # create other variables: anss = answer_s stores answers from exhibit factory; base is
@@ -75,6 +76,7 @@ class Fairness():
                 return [self.last_plot.get_figure()]
             except:
                 return self.last_plot.flatten()[0].get_figure()
+
     # @property
     # def stand_alone_mapping(self):
     #     """
@@ -96,7 +98,7 @@ class Fairness():
         """
         x = self.agg_spec_dict.keys()
         return list(itertools.chain.from_iterable(
-            itertools.combinations(x,n) for n in range(len(x) + 1)))[1:]
+            itertools.combinations(x, n) for n in range(len(x) + 1)))[1:]
 
     def make_vars(self, p, kind):
         '''
@@ -106,7 +108,7 @@ class Fairness():
         :param kind:
         :return:
         '''
-        ans = {n if len(v.line_names) > 1 else v.line_names[0] : v.q(p, kind) for n, v in self.ports.items()}
+        ans = {n if len(v.line_names) > 1 else v.line_names[0]: v.q(p, kind) for n, v in self.ports.items()}
         # append the single line portfolios by portfolio name
         for n, v in self.ports.items():
             if len(v.line_names) == 1:
@@ -130,7 +132,7 @@ class Fairness():
         self.last_plot = ax
 
     def gamma(self, p, kind, port_name, plot=False, compute_stand_alone=False, loss_threshold=-1,
-              ylim_zoom=(.98, 1.005), extreme_var=1-2e-8):
+              ylim_zoom=(.98, 1.005), extreme_var=1 - 2e-8):
         """
         return the vector gamma_a(x), the conditional layer effectiveness given assets a
         gamma can be created with no base and no calibration. It only depends on total losses.
@@ -147,7 +149,7 @@ class Fairness():
         # temp = port.density_df.filter(regex='^p_|^e1xi_1gta_|S|loss').copy()
         # just before...
         a = var_dict[port_name]
-        a_ = a - port.bs
+        # a_ = a - port.bs
 
         # total is a special case
         l = 'total'
@@ -191,7 +193,7 @@ class Fairness():
                     a_l_ = a_l - port.bs
                     xinv = temp[f'e1xi_1gta_{l}'].shift(-1)
                     gam_name = f'gamma_{l}_sa'
-                    s = 1-temp[f'p_{l}'].cumsum()
+                    s = 1 - temp[f'p_{l}'].cumsum()
                     temp[f'S_{l}'] = s
                     temp[gam_name] = 0
                     temp.loc[0:a_l_, gam_name] = (s[0:a_l_] - s[a_l] + a_l * xinv[a_l]) / s[0:a_l_]
@@ -205,7 +207,7 @@ class Fairness():
                 # unconditional version avoid divide and multiply by a small number
                 # exeqa is closest to the raw output...
                 # there is an INDEX ISSUE with _add_exa...there are cumsums there that should be cumintegrals..
-                temp[f'exi_x1gta_{l}'] = np.cumsum((temp[f'exeqa_{l}'] * temp.p_total / temp.loss )[::-1]) * port.bs
+                temp[f'exi_x1gta_{l}'] = np.cumsum((temp[f'exeqa_{l}'] * temp.p_total / temp.loss)[::-1]) * port.bs
                 temp[gam_name] = np.cumsum((min_xa * temp[f'exi_xeqa_{l}'] * temp.p_total)[::-1]) / \
                                  (temp[f'exi_x1gta_{l}']) * port.bs
 
@@ -215,24 +217,34 @@ class Fairness():
         temp['WORST'] = np.maximum(0, 1 - temp.loc[a, 'S'] / temp.S)
 
         if plot:
+            renamer = {}
             if loss_threshold > 0:
-                renamer = {
-                    "gamma_A.thin_sa": f"A stand alone, a={var_dict['A.thin']:.0f}",
-                    "gamma_AB_A.thin": "A part of A+B",
-                    "gamma_AB_B.thick": "B part of A+B",
-                    "gamma_AB_total": f"A+B, a={var_dict['AB']:.0f}",
-                    "gamma_B.thick_sa": f"B stand alone, a={var_dict['B.thick']:.0f}",
-                    "p_A.thin": "A density",
-                    "p_B.thick": "B density",
-                    "p_total": "A+B density",
-                    "S_A.thin": "A survival",
-                    "S_B.thick": "B survival",
-                    "S_total": "A+B survival"
-                }
+                for ln in port.line_names:
+                    renamer[f'gamma_{ln}_sa'] = f"{ln[0]} stand alone, a={var_dict[ln]:.0f}"
+                    renamer[f'gamma_{port.name}_{ln}'] = f"{ln[0]} part of {port.name}"
+                    renamer[f'p_{ln}'] = f'{ln} stand alone density'
+                    renamer[f'S_{ln}'] = f'{ln} stand alone survival'
+                renamer['p_total'] = f'{port.name}.total density'
+                renamer['S_total'] = f'{port.name}.total survival'
+                renamer[f'gamma_{port.name}_total'] = f"{port.name} total, a={var_dict[port.name]:.0f}"
+                # originally
+                # renamer = {
+                #     "gamma_A.thin_sa": f"A stand alone, a={var_dict['A.thin']:.0f}",
+                #     "gamma_AB_A.thin": "A part of A+B",
+                #     "gamma_AB_B.thick": "B part of A+B",
+                #     "gamma_AB_total": f"A+B, a={var_dict['AB']:.0f}",
+                #     "gamma_B.thick_sa": f"B stand alone, a={var_dict['B.thick']:.0f}",
+                #     "p_A.thin": "A density",
+                #     "p_B.thick": "B density",
+                #     "p_total": "A+B density",
+                #     "S_A.thin": "A survival",
+                #     "S_B.thick": "B survival",
+                #     "S_total": "A+B survival"
+                # }
 
             # rename if doing the second set of plots too
             if loss_threshold > 0:
-                spl = temp.filter(regex='gamma|BEST|WORST').rename(columns=renamer).sort_index(1).\
+                spl = temp.filter(regex='gamma|BEST|WORST').rename(columns=renamer).sort_index(1). \
                     plot(ylim=[-.05, 1.05], linewidth=1)
             else:
                 spl = temp.filter(regex='gamma|BEST|WORST').sort_index(1).plot(ylim=[-.05, 1.05], linewidth=1)
@@ -250,7 +262,8 @@ class Fairness():
             # fancy comparison plots
             if loss_threshold > 0 and compute_stand_alone:
                 temp_ex = temp.query(f'loss < {loss_threshold}').filter(regex='gamma_|p_')
-                temp_ex[[f'S_{l[2:]}' for l in temp_ex.filter(regex='p_').columns]] = (1 - temp_ex.filter(regex='p_').cumsum())
+                temp_ex[[f'S_{l[2:]}' for l in temp_ex.filter(regex='p_').columns]] = (
+                            1 - temp_ex.filter(regex='p_').cumsum())
 
                 f, axs = plt.subplots(3, 1, figsize=(8, 9), squeeze=False, constrained_layout=True)
                 ax1 = axs[0, 0]
@@ -265,17 +278,22 @@ class Fairness():
                 ax3.set(ylim=[0, 1.005], title=f'Survival Functions up to p={port.cdf(loss_threshold):.1%} Loss')
                 temp_ex.filter(regex='S_').rename(columns=renamer).sort_index(axis=1).plot(ax=ax3)
                 # sort out colors
-                col_by_line = {l.get_label().split()[0]: l.get_color() for l in ax3.lines}
+                col_by_line = {l.get_label().split('.')[0]: l.get_color() for l in ax3.lines}
+                # print(col_by_line)
                 l_loc = dict(zip(axs.flatten(), ['upper right', 'lower left', 'upper right']))
-                for ax in axs.flatten():
-                    for line in ax.lines:
-                        # line name and shortened line name
-                        ln = line.get_label()
-                        lns = ln.split()[0].strip(',')
-                        ls = '--' if ln.find('stand') > 0 else '-'
-                        line.set(color=col_by_line[lns], linestyle=ls)
-                    # update legend to reflect line style changes
-                    ax.legend(loc=l_loc[ax])
+                try:
+                    for ax in axs.flatten():
+                        for line in ax.lines:
+                            # line name and shortened line name
+                            ln = line.get_label()
+                            lns = ln.split(' ')[0]
+                            ls = '--' if ln.find('stand alone') > 0 else '-'
+                            if lns in col_by_line:
+                                line.set(color=col_by_line[lns], linestyle=ls)
+                        # update legend to reflect line style changes
+                        ax.legend(loc=l_loc[ax])
+                except:
+                    print('some error' * 20)
                 for ax in axs.flatten():
                     ax.grid()
                     # ax.set(xlim=[0, var['AB']])
@@ -298,7 +316,7 @@ class Fairness():
             subportfolios = self.ports.items()
         for n, port in subportfolios:
             if n != base_name:
-                g = self.gamma(p, kind, n, plot, compute_stand_alone).\
+                g = self.gamma(p, kind, n, plot, compute_stand_alone). \
                     filter(regex='gamma_[\d\D]*_(?!total)')
             else:
                 # all columns
@@ -312,15 +330,15 @@ class Fairness():
             temp[f'exlea_{ln}'] = port.density_df[f'exlea_{ln}']
         return temp
 
-    def calibrate(self, dname, LR=None, ROE=None, p=None, A=None, base_port=-1, plot=False):
+    def calibrate(self, dname, LR=None, ROE=None, p=None, kind='', A=None, base_port=-1, plot=False):
         # calibrate the base distortion that will be used for all the other examples
         if type(base_port) == int:
             base_port_name = list(self.ports.keys())[base_port]
         else:
             base_port_name = base_port
         # base is an Answer class object with lots of info
-        self.base = self.ports[base_port_name].\
-            example_factory(dname=dname, LR=LR, ROE=ROE, p=p, A=A, index='loss', plot=plot)
+        self.base = self.ports[base_port_name]. \
+            example_factory(dname=dname, LR=LR, ROE=ROE, p=p, kind=kind, A=A, index='loss', plot=plot)
         if plot:
             # also plot the distortion function
             ax = SimpleAxes(1, 1)
@@ -329,8 +347,7 @@ class Fairness():
         # show the highlights in return
         return self.base.exhibit.T.filter(regex='^(M\.|T\.|EP|A)', axis=0)
 
-
-    def rerun(self, p, plot=False):
+    def rerun(self, p, kind, plot=False):
         """
         re run for sub portfolios at possibly different capital level using
         the base distortion
@@ -342,10 +359,11 @@ class Fairness():
         self.anss = {}
         for port in self.ports.values():
             self.anss[port.name] = port.example_factory(dname=self.base.distortion,
-                                                        p=p, index='loss', plot=plot)
+                                                        p=p, kind=kind, index='loss', plot=plot)
 
-        self.uber = pd.concat([i.exhibit.T.filter(regex='^(M\.|T\.|EP|A)', axis=0).sort_index() for i in self.anss.values()],
-                 axis=1, keys=list(self.anss.keys()), names=['Example'], sort=True)
+        self.uber = pd.concat(
+            [i.exhibit.T.filter(regex='^(M\.|T\.|EP|A)', axis=0).sort_index() for i in self.anss.values()],
+            axis=1, keys=list(self.anss.keys()), names=['Example'], sort=True)
 
         return self.uber
 
@@ -362,7 +380,11 @@ class Fairness():
 
 
         """
-        junk = self.anss[example].augmented_df
+        if self.anss and example in self.anss:
+            junk = self.anss[example].augmented_df
+        else:
+            logging.warning('Assuming you mean to use the base example...')
+            junk = self.base.augmented_df
         port = self.ports[example]
         temp = junk.filter(regex='exi_xgtag?_(?!sum)|^S|^gS').copy()
 
@@ -392,68 +414,85 @@ class Fairness():
         temp['M.ROE'] = (temp['M.P'] - temp['M.L']) / (1 - temp['M.P'])
         temp['M.M'] = temp['M.P'] - temp['M.L']
         for l in port.line_names:
-            # irritation that you can't have one letter line names
+            # irritation that you can't have one letter line names TODO that doesn't seem to be true....
             l0 = l[0]
             temp[f'beta/alpha.{l0}'] = temp[f'beta.{l0}'] / temp[f'alpha.{l0}']
             temp[f'M.M.{l0}'] = temp[f'beta.{l0}'] * temp['M.P'] - temp[f'alpha.{l0}'] * temp['M.L']
 
         if plot:
-            def tidy(simple_ax):
-                ax = simple_ax.ax
-                ax.tick_params('x', which='major', labelsize='small')
-                ax.tick_params('y', which='major', labelsize='x-small')
-                ax.title.set_size('medium')
+            def tidy(ax):
+                pass
+                # ax.tick_params('x', which='major', labelsize='small')
+                # ax.tick_params('y', which='major', labelsize='x-small')
+                # ax.title.set_size('medium')
 
             junk.index.name = 'Assets a'
             temp.index.name = 'Assets a'
             if xlim == 0:
                 xlim = port.q(1 - 1e-5)
-            ax = SimpleAxes(8, sharex=True)
 
-            (1 - junk.filter(regex='p_').cumsum()).rename(columns=renamer).sort_index(1). \
-                plot(ylim=[0, 1], xlim=[0, xlim], title='Survival functions', ax=next(ax)).grid('b')
-            tidy(ax)
+            f, axs = plt.subplots(4, 2, figsize=(8, 10), constrained_layout=True, squeeze=False)
+            ax = iter(axs.flatten())
 
-            junk.filter(regex='exi_xgtag?').rename(columns=renamer).sort_index(1). \
-                plot(ylim=[0, 1], xlim=[0, xlim], title=r'$\alpha=E[X_i/X | X>a],\beta=E_Q$ by Line', ax=next(ax)).grid(
-                'b')
-            tidy(ax)
+            # ONE
+            a = (1 - junk.filter(regex='p_').cumsum()).rename(columns=renamer).sort_index(1). \
+                plot(ylim=[0, 1], xlim=[0, xlim], title='Survival functions', ax=next(ax))
+            a.grid('b')
+            tidy(a)
 
-            # total margins
-            junk.filter(regex='^T\.M').rename(columns=renamer).sort_index(1). \
-                plot(xlim=[0, xlim], title='Total Margins by Line', ax=next(ax)).grid('b')
-            tidy(ax)
+            # TWO
+            a = junk.filter(regex='exi_xgtag?').rename(columns=renamer).sort_index(1). \
+                plot(ylim=[0, 1], xlim=[0, xlim], title=r'$\alpha=E[X_i/X | X>a],\beta=E_Q$ by Line', ax=next(ax))
+            a.grid('b')
+            tidy(a)
 
-            # marginal margins
-            (junk.filter(regex='^M\.M').rename(columns=renamer).sort_index(1) / port.bs). \
-                plot(ylim=[-.1, .4], xlim=[0, xlim], title='Marginal Margins by Line', ax=next(ax)).grid('b')
-            tidy(ax)
+            # THREE total margins
+            a = junk.filter(regex=r'^T\.M').rename(columns=renamer).sort_index(1). \
+                plot(xlim=[0, xlim], title='Total Margins by Line', ax=next(ax))
+            a.grid('b')
+            tidy(a)
 
-            l = junk.filter(regex='^Q|gF').rename(columns=renamer).sort_index(1). \
+            # FOUR marginal margins was dividing by bs end of first line
+            # for some reason the last entry in M.M_total can be problematic.
+            a = (junk.filter(regex=r'^M\.M').rename(columns=renamer).sort_index(1).iloc[:-1, :].
+                 plot(xlim=[0, xlim], title='Marginal Margins by Line', ax=next(ax)))
+            a.grid('b')
+            tidy(a)
+
+            # FIVE
+            a = junk.filter(regex=r'^M\.Q|gF').rename(columns=renamer).sort_index(1). \
                 plot(xlim=[0, xlim], title='Capital = 1-gS = F!', ax=next(ax))
-            l.grid('b')
-            l.lines[0].set(linewidth=5, alpha=0.36)
-            tidy(ax)
+            a.grid('b')
+            for _ in a.lines:
+                if _.get_label() == 'gF':
+                    _.set(linewidth=5, alpha=0.3)
+            # recreate legend because changed lines
+            a.legend()
 
-            # see apply distortion, line 1890 ROE is in augmented_df
-            junk.filter(regex='^ROE$|exi_xeqa').rename(columns=renamer).sort_index(1). \
-                plot(xlim=[0, xlim], title='M.ROE Total and $E[X_i/X | X=a]$ by line', ax=next(ax)).grid('b')
-            tidy(ax)
+            # SIX see apply distortion, line 1890 ROE is in augmented_df
+            a = junk.filter(regex='^ROE$|exi_xeqa').rename(columns=renamer).sort_index(1). \
+                plot(xlim=[0, xlim], title='M.ROE Total and $E[X_i/X | X=a]$ by line', ax=next(ax))
+            a.grid('b')
+            tidy(a)
 
-            # improve scale selection
-            temp.filter(regex='beta/alpha\.|LR').rename(columns=renamer).sort_index(1). \
+            # SEVEN improve scale selection
+            a = temp.filter(regex='beta/alpha\.|LR').rename(columns=renamer).sort_index(1). \
                 plot(ylim=[-.05, 1.5], xlim=[0, xlim], title='Alpha, Beta and Marginal LR',
-                     ax=next(ax)).grid('b')
-            tidy(ax)
+                     ax=next(ax))
+            a.grid('b')
+            tidy(a)
 
-            junk.filter(regex='LR').rename(columns=renamer).sort_index(1). \
+            # EIGHT
+            a = junk.filter(regex='LR').rename(columns=renamer).sort_index(1). \
                 plot(ylim=[-.05, 1.25], xlim=[0, xlim], title='Total ↑LR by Line',
-                     ax=next(ax)).grid('b')
-            tidy(ax)
+                     ax=next(ax))
+            a.grid('b')
+            tidy(a)
 
-            ax.tidy()
+            # f.suptitle(' ', fontsize='x-large')
+
             # store away
-            self.last_plot = ax.axs
+            self.last_plot = f
         return temp
 
 
@@ -483,7 +522,7 @@ class SimpleAxes():
         h *= sc
         w = min(w, 8)
         self.f, self.axs = plt.subplots(nr, nc, figsize=(w, h), squeeze=False,
-                              constrained_layout=True, **kwargs)
+                                        constrained_layout=True, **kwargs)
         self.axit = iter(self.axs.flatten())
         self._ax = None
 
@@ -509,4 +548,3 @@ class SimpleAxes():
         if self._ax is None:
             self._ax = next(self.axit)
         return self._ax
-
